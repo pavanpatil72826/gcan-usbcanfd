@@ -18,7 +18,8 @@ the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tr
 | Error counters, ERROR-PASSIVE with radar off, BUS-OFF, `ip link ... type can restart` recovery | yes, tested on hardware |
 | Classic CAN receive (`fd off`, 500K, 82 standard IDs, ~1640 frames/s, no errors or drops) | yes, tested on hardware |
 | Classic CAN transmit (cyclic speed / yaw / gear, 110 frames/s, radar echoes the values) | yes, tested on hardware |
-| CAN1 (second connector), FD frames > 8 B, extended IDs, RTR | not tested yet |
+| CAN1 (second connector): classic receive and cyclic transmit, radar echoes the values, channels stay separate | yes, tested on hardware |
+| FD frames > 8 B, extended IDs, RTR | not tested yet |
 | Acceptance filters, hardware timestamps | not implemented |
 
 ## Build and load
@@ -42,6 +43,7 @@ Without `fd on` the data rate is set equal to the nominal rate.
 
 ## Notes
 - Channels: Linux `can0` is device channel index 0 (called channel 1 by the vendor documents), `can1` is index 1 (channel 2).
+  Both channels work. Frames received on one channel appear only on that interface, and transmit goes out on the interface used.
 - With no node on the bus to acknowledge frames, the device keeps retrying and stops accepting writes after ~5 frames. The driver then returns
   `ENOBUFS` to the sender and stays alive. The channel goes `ERROR-PASSIVE` (TEC 128) and can reach `BUS-OFF`; recover with
   `ip link set can0 type can restart` (or down and up).
