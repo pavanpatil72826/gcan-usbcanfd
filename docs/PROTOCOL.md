@@ -60,5 +60,5 @@ Four bytes `aa 55 <n> 00`, about 0.4 ms after the write. `n` is the number of fr
 - Bytes 18..29 of the status record (lost / failed counters, bus load) and the type 3 record.
 - RTR transmit layout (the driver sends no data bytes).
 - Acceptance filter configuration, listen-only and other modes.
-- Whether the device loops back transmitted frames on the receive stream.
+- Loopback: one acknowledged frame was not echoed on the receive stream; other cases (unacknowledged, classic, long FD) are untested.
 - Channel 1 beyond the init and start commands.
