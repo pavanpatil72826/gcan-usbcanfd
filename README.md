@@ -54,4 +54,6 @@ Without `fd on` the data rate is set equal to the nominal rate.
 
 Pending tests and open items: [docs/TODO.md](docs/TODO.md).
 
-See [contribution.md](contribution.md) and [LICENSE.md](LICENSE.md).
+## License
+GPL-2.0, see [LICENSE](LICENSE). The kernel exports its CAN and USB interfaces only to GPL modules, so the driver has to be GPL.
+Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).

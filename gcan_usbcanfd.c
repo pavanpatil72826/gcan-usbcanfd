@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * SocketCAN driver for the GCAN USBCANFD adapter (USB 0c66:000e, "EmbedNet / GCAN USBCANFD DEV").
+ * @Copyright: Copyright (C) 2026 Gahan Ai Pvt Ltd
+ * @Author: Pavan Patil
+ * @Date: 2026-10-08
+ * @Last Modified by:   Pavan Patil
+ * @Last Modified time: 2026-10-09 12:36:00
+ * @Description: SocketCAN driver for the GCAN USBCANFD adapter (USB 0c66:000e).
  *
  * The protocol was reverse engineered from USB captures of the vendor Windows driver
  * (see docs/PROTOCOL.md). Endpoints (all bulk, 512 byte packets):
@@ -13,6 +18,7 @@
  * Only the bitrates in the tables below are accepted, because the device takes a table index.
  *
  * Target kernel: 6.8 (flat can_priv bittiming layout).
+ *
  */
 #include <linux/module.h>
 #include <linux/kernel.h>

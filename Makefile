@@ -1,3 +1,10 @@
+# @Copyright: Copyright (C) 2026 Gahan Ai Pvt Ltd
+# @Author: Pavan Patil
+# @Date: 2026-10-08
+# @Last Modified by:   Pavan Patil
+# @Last Modified time: 2026-10-09 12:36:00
+# @Description: Build, load and install the gcan_usbcanfd kernel module.
+
 obj-m := gcan_usbcanfd.o
 
 KVERSION ?= $(shell uname -r)
