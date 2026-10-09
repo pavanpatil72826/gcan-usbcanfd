@@ -19,6 +19,7 @@ the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tr
 | Classic CAN receive (`fd off`, 500K, 82 standard IDs, ~1640 frames/s, no errors or drops) | yes, tested on hardware |
 | Classic CAN transmit (cyclic speed / yaw / gear, 110 frames/s, radar echoes the values) | yes, tested on hardware |
 | CAN1 (second connector): classic receive and cyclic transmit, radar echoes the values, channels stay separate | yes, tested on hardware |
+| `make install`: module loads by itself when the adapter is plugged in, then works as before | yes, tested on hardware |
 | FD frames > 8 B, extended IDs, RTR | not tested yet |
 | Acceptance filters, hardware timestamps | not implemented |
 
