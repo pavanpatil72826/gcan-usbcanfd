@@ -21,5 +21,3 @@ send from one channel while running `candump` on the other. Compare the bytes in
 - [ ] Acceptance filters and listen-only mode are not implemented (the init packet has fields for filters)
 - [ ] Hardware timestamps are ignored (receive records carry them)
 - [ ] The module is installed for one kernel version; DKMS would rebuild it after kernel updates
-- [ ] Licence: the repo template ships a non-commercial licence, the module declares GPL (needed for the CAN core symbols). Decide and make them consistent.
-- [ ] Interface names: Linux `can0` / `can1` are the vendor's channels 1 / 2. A udev rule could name them after the connectors.
