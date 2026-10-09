@@ -12,10 +12,9 @@ send from one channel while running `candump` on the other. Compare the bytes in
 - [ ] RTR frames (the driver sends no data bytes; the real transmit layout was never captured)
 - [ ] FD with a different data bitrate than 2M, and other nominal bitrates from the table (only 500K and 500K/2M were run)
 - [ ] Reboot with the adapter plugged in: `can0` / `can1` should be present after login (plug-in loading is tested, reboot is not)
-- [ ] Unplug while transmitting heavily, and while a channel is in bus-off
+- [ ] Unplug while transmitting heavily, and while a channel is in bus-off (unplug while idle with both channels up and receiving was re-verified with the batched driver)
 
 ## Open items (not tests)
-- [ ] After the transmit batching rewrite: unplug/replug still to be re-run (the teardown code changed). The down/up cycle, a burst into a stalled channel (110 of 120 accepted, 10 refused, no hang), bus-off and `restart` were re-run and pass.
 - [ ] One receive drop (`rx_dropped` on can0: 1 after the 550 frames/s stress run, a few more around each bus-off restart); unexplained, not growing during normal receive
 - [ ] Status record bytes 18..29 (lost / failed counters, bus load) and the type 3 record are not decoded; see `docs/PROTOCOL.md`
 - [ ] Acceptance filters and listen-only mode are not implemented (the init packet has fields for filters)

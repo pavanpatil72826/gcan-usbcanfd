@@ -14,7 +14,7 @@ the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tr
 | Receive in `candump` (CAN FD, 500K/2M, ~840 frames/s, no drops) | yes, tested on hardware |
 | Transmit with `cansend` and python-can (8 B FD+BRS, 20 ms cyclic) | yes, tested on hardware |
 | `ip link set can0 down` / up cycle | yes, receive and transmit recover |
-| Unplug while up, then replug | yes, clean disconnect, driver rebinds on its own |
+| Unplug while up, then replug (both channels up, receiving) | yes, clean disconnect, driver rebinds on its own; re-verified after the transmit batching rewrite |
 | Error counters, ERROR-PASSIVE with radar off, BUS-OFF, `ip link ... type can restart` recovery | yes, tested on hardware |
 | Classic CAN receive (`fd off`, 500K, 82 standard IDs, ~1640 frames/s, no errors or drops) | yes, tested on hardware |
 | Classic CAN transmit (cyclic speed / yaw / gear, 110 frames/s, radar echoes the values) | yes, tested on hardware |
