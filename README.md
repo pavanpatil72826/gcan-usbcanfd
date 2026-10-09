@@ -22,6 +22,7 @@ the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tr
 | `make install`: module loads by itself when the adapter is plugged in, then works as before | yes, tested on hardware |
 | FD receive of 16, 24 and 64 byte frames with BRS (a second CAN FD radar: 6 IDs at 20 Hz, no lost cycles, no error events, 1320 frames decoded against its DBC) | yes, tested on hardware |
 | Both channels receiving at once (FD radar on can0, classic radar on can1: 141 + 1641 frames/s, no frames crossing channels, 0 errors, 0 drops, all frames decode) | yes, tested on hardware |
+| Transmit on one channel (cyclic inputs, 110 frames/s) while the other receives an FD stream: no transmit errors, no lost receive cycles (239 of 239) | yes, tested on hardware |
 | FD *transmit* of frames > 8 B, extended IDs, RTR | not tested yet |
 | Acceptance filters, hardware timestamps | not implemented |
 
