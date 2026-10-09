@@ -11,8 +11,9 @@ the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tr
 | Builds and loads on 6.8 | yes |
 | Plug-in creates `can0` / `can1`, `ip link set up` works | yes |
 | Bitrate tables shown by `ip -details link` | yes |
-| Receive in `candump` | not yet confirmed with this driver |
-| Transmit with `cansend` | not yet confirmed with this driver |
+| Receive in `candump` (CAN FD, 500K/2M, ~840 frames/s, no drops) | yes, tested on hardware |
+| Transmit with `cansend` and python-can (8 B FD+BRS, 20 ms cyclic) | yes, tested on hardware |
+| Down / up cycle, unplug while up, CAN1, classic and 64 B FD frames | not tested yet |
 | Error / bus-off reporting, filters, hardware timestamps | not implemented |
 
 ## Build and load
@@ -37,6 +38,6 @@ Without `fd on` the data rate is set equal to the nominal rate.
 ## Notes
 - Do not use a userspace libusb tool on the adapter while this driver is loaded: tools that call `detach_kernel_driver` will remove it from the device.
 - RTR frames are sent without data bytes; the transmit layout for RTR was never captured.
-- The device may echo transmitted frames on the receive stream; this is not yet checked.
+- The device does not loop back transmitted frames on the receive stream (checked with one frame). `candump` shows each sent frame once, from the normal SocketCAN local echo.
 
 See [contribution.md](contribution.md) and [LICENSE.md](LICENSE.md).
