@@ -1,0 +1,82 @@
+# ROS2
+build/
+install/
+log/
+*.log
+*.bag
+*.db3
+*.sqlite3
+
+# ROS2 Colcon
+colcon_ws/build/
+colcon_ws/install/
+colcon_ws/log/
+
+# Visual Studio Code
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+. Python egg info
+*.egg-info/
+dist/
+build/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# C++
+*.obj
+*.o
+*.so
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.idb
+*.lib
+*.a
+*.lo
+*.lai
+*.la
+*.def
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+Testing/
+CTestTestfile.cmake
+_build/
+
+# Node.js / JavaScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Misc
+.DS_Store
+*.swp
+*.swo
+*.bak
+*~
+
+# JetBrains IDEs
+.idea/
+*.iml
+
+# VSCode
+.vscode
