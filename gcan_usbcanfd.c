@@ -48,7 +48,9 @@
 #define GCAN_NUM_RX_URBS	4
 #define GCAN_RX_BUF_SIZE	1024
 #define GCAN_TX_BLOCK_SIZE	1024	/* the device only accepts 1024 byte transmit transfers */
-#define GCAN_MAX_TX_URBS	10
+#define GCAN_TX_ECHO_SLOTS	64	/* frames per channel that may be queued or in flight */
+#define GCAN_NUM_TX_BLOCKS	4	/* one being filled, up to GCAN_TX_INFLIGHT on the wire, one spare */
+#define GCAN_TX_INFLIGHT	2
 #define GCAN_ACK_BUF_SIZE	64
 #define GCAN_CMD_BUF_SIZE	512
 #define GCAN_CMD_TIMEOUT_MS	1000
@@ -83,12 +85,22 @@ static const u32 gcan_data_rates[] = {
 struct gcan_dev;
 struct gcan_chan;
 
-struct gcan_tx_ctx {
-	struct gcan_chan *chan;
+/* Records of both channels share the 1024 byte transmit blocks (each record carries its channel). */
+#define GCAN_TX_MAX_RECS	(GCAN_TX_BLOCK_SIZE / GCAN_REC_HDR_LEN)
+
+struct gcan_tx_ent {
+	u8 ch;
+	u8 idx;			/* echo skb slot of that channel */
+};
+
+struct gcan_tx_blk {
+	struct gcan_dev *dev;
 	struct urb *urb;
 	u8 *buf;
-	unsigned int idx;	/* echo skb index */
-	bool busy;
+	unsigned int len;	/* bytes used */
+	unsigned int n;		/* records */
+	bool busy;		/* submitted, completion pending */
+	struct gcan_tx_ent ent[GCAN_TX_MAX_RECS];
 };
 
 /* can_priv must stay the first member: alloc_candev() puts it at netdev_priv() */
@@ -100,10 +112,8 @@ struct gcan_chan {
 	bool registered;
 	u8 tec, rec;		/* last transmit / receive error counters from the status record */
 
-	spinlock_t tx_lock;
-	atomic_t tx_active;
-	struct gcan_tx_ctx tx[GCAN_MAX_TX_URBS];
-	struct usb_anchor tx_anchor;
+	unsigned int tx_head;	/* next echo slot; tx_head and tx_cnt are protected by dev->tx_lock */
+	unsigned int tx_cnt;	/* frames queued in a block or in flight */
 };
 
 struct gcan_dev {
@@ -117,6 +127,12 @@ struct gcan_dev {
 	struct mutex open_lock;
 	int open_count;
 	bool disconnected;
+
+	spinlock_t tx_lock;
+	struct gcan_tx_blk tx_blk[GCAN_NUM_TX_BLOCKS];
+	struct gcan_tx_blk *tx_cur;	/* block being filled */
+	int tx_inflight;
+	struct usb_anchor tx_anchor;
 
 	struct usb_anchor rx_anchor;
 	struct urb *rx_urb[GCAN_NUM_RX_URBS];
@@ -431,57 +447,121 @@ fail:
 
 /* ---------------------------------------------------------------- transmit (EP 0x01) */
 
+static void gcan_tx_complete(struct urb *urb);
+
+/* Give back the echo skbs of records that never reached the wire. Caller holds tx_lock. */
+static void gcan_tx_drop_ents(struct gcan_dev *d, const struct gcan_tx_ent *ent, unsigned int n)
+{
+	unsigned int i;
+
+	for (i = 0; i < n; i++) {
+		struct gcan_chan *c = d->chan[ent[i].ch];
+
+		can_free_echo_skb(c->netdev, ent[i].idx, NULL);
+		c->netdev->stats.tx_dropped++;
+		c->tx_cnt--;
+	}
+}
+
+/* Send the block being filled if it holds frames and a USB slot is free. Caller holds tx_lock. */
+static void gcan_tx_kick(struct gcan_dev *d)
+{
+	struct gcan_tx_blk *blk = d->tx_cur, *next = NULL;
+	int i, err;
+
+	if (!blk->n || d->tx_inflight >= GCAN_TX_INFLIGHT)
+		return;
+	for (i = 0; i < GCAN_NUM_TX_BLOCKS; i++) {
+		if (&d->tx_blk[i] != blk && !d->tx_blk[i].busy) {
+			next = &d->tx_blk[i];
+			break;
+		}
+	}
+	if (!next)
+		return;
+
+	memset(blk->buf + blk->len, 0, GCAN_TX_BLOCK_SIZE - blk->len);	/* the device expects zero padding */
+	blk->busy = true;
+	usb_fill_bulk_urb(blk->urb, d->udev, usb_sndbulkpipe(d->udev, GCAN_EP_TX_OUT & 0x0f),
+			  blk->buf, GCAN_TX_BLOCK_SIZE, gcan_tx_complete, blk);
+	usb_anchor_urb(blk->urb, &d->tx_anchor);
+	err = usb_submit_urb(blk->urb, GFP_ATOMIC);
+	if (err) {
+		usb_unanchor_urb(blk->urb);
+		blk->busy = false;
+		gcan_tx_drop_ents(d, blk->ent, blk->n);
+		blk->n = blk->len = 0;
+		if (err != -ENODEV)
+			dev_warn_ratelimited(&d->intf->dev, "tx submit failed: %d\n", err);
+		return;
+	}
+	d->tx_inflight++;
+	d->tx_cur = next;
+}
+
 static void gcan_tx_complete(struct urb *urb)
 {
-	struct gcan_tx_ctx *ctx = urb->context;
-	struct gcan_chan *c = ctx->chan;
-	struct net_device *netdev = c->netdev;
+	struct gcan_tx_blk *blk = urb->context;
+	struct gcan_dev *d = blk->dev;
+	struct gcan_tx_ent ent[GCAN_TX_MAX_RECS];
+	unsigned int done[GCAN_MAX_CHAN] = { 0 };
+	unsigned int n, i;
 	unsigned long flags;
 	int status = urb->status;
 
-	if (!status) {
-		netdev->stats.tx_packets++;
-		netdev->stats.tx_bytes += can_get_echo_skb(netdev, ctx->idx, NULL);
-	} else {
-		can_free_echo_skb(netdev, ctx->idx, NULL);
-		if (status != -ENOENT && status != -ECONNRESET && status != -ESHUTDOWN)
-			netdev->stats.tx_errors++;
+	spin_lock_irqsave(&d->tx_lock, flags);
+	n = blk->n;
+	memcpy(ent, blk->ent, n * sizeof(ent[0]));
+	blk->n = blk->len = 0;
+	blk->busy = false;
+	d->tx_inflight--;
+	gcan_tx_kick(d);	/* frames that piled up meanwhile go out together */
+	spin_unlock_irqrestore(&d->tx_lock, flags);
+
+	for (i = 0; i < n; i++) {
+		struct net_device *nd = d->chan[ent[i].ch]->netdev;
+
+		if (!status) {
+			nd->stats.tx_packets++;
+			nd->stats.tx_bytes += can_get_echo_skb(nd, ent[i].idx, NULL);
+		} else {
+			can_free_echo_skb(nd, ent[i].idx, NULL);
+			if (status != -ENOENT && status != -ECONNRESET && status != -ESHUTDOWN)
+				nd->stats.tx_errors++;
+		}
+		done[ent[i].ch]++;
 	}
 
-	spin_lock_irqsave(&c->tx_lock, flags);
-	ctx->busy = false;
-	spin_unlock_irqrestore(&c->tx_lock, flags);
+	for (i = 0; i < GCAN_MAX_CHAN; i++) {
+		struct gcan_chan *c = d->chan[i];
+		bool full;
 
-	if (atomic_dec_return(&c->tx_active) == GCAN_MAX_TX_URBS - 1)
-		netif_wake_queue(netdev);
+		if (!c)
+			continue;
+		spin_lock_irqsave(&d->tx_lock, flags);
+		c->tx_cnt -= done[i];	/* only after the echo slots were released */
+		full = c->tx_cnt >= GCAN_TX_ECHO_SLOTS;
+		spin_unlock_irqrestore(&d->tx_lock, flags);
+		/* a channel may have stopped its queue because no USB slot was free, whoever's block just finished */
+		if (!full && netif_running(c->netdev) && netif_queue_stopped(c->netdev) &&
+		    c->can.state != CAN_STATE_BUS_OFF)
+			netif_wake_queue(c->netdev);
+	}
 }
 
 static netdev_tx_t gcan_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
 	struct gcan_chan *c = netdev_priv(netdev);
 	struct gcan_dev *d = c->dev;
-	struct gcan_tx_ctx *ctx = NULL;
 	struct canfd_frame *cf = (struct canfd_frame *)skb->data;
-	u8 flags = 0, dlen;
+	struct gcan_tx_blk *blk;
+	u8 flags = 0, dlen, *rec;
 	unsigned long irqflags;
-	int i, err;
+	unsigned int idx;
+	int err;
 
 	if (can_dropped_invalid_skb(netdev, skb))
 		return NETDEV_TX_OK;
-
-	spin_lock_irqsave(&c->tx_lock, irqflags);
-	for (i = 0; i < GCAN_MAX_TX_URBS; i++) {
-		if (!c->tx[i].busy) {
-			ctx = &c->tx[i];
-			ctx->busy = true;
-			break;
-		}
-	}
-	spin_unlock_irqrestore(&c->tx_lock, irqflags);
-	if (!ctx) {
-		netif_stop_queue(netdev);
-		return NETDEV_TX_BUSY;
-	}
 
 	if (can_is_canfd_skb(skb)) {
 		flags |= GCAN_FLAG_FD;
@@ -501,53 +581,80 @@ static netdev_tx_t gcan_start_xmit(struct sk_buff *skb, struct net_device *netde
 	if (cf->can_id & CAN_EFF_FLAG)
 		flags |= GCAN_FLAG_EXT;
 
-	memset(ctx->buf, 0, GCAN_TX_BLOCK_SIZE);
-	ctx->buf[0] = GCAN_REC_HDR_LEN + dlen;
-	ctx->buf[1] = c->ch;
-	/* bytes 2..9: timestamp, left zero */
-	ctx->buf[10] = flags;
-	ctx->buf[11] = dlen;
-	put_unaligned_le32(cf->can_id & ((cf->can_id & CAN_EFF_FLAG) ? CAN_EFF_MASK : CAN_SFF_MASK),
-			   &ctx->buf[12]);
-	if (dlen)
-		memcpy(&ctx->buf[GCAN_REC_HDR_LEN], can_is_canfd_skb(skb) ? cf->data :
-		       ((struct can_frame *)skb->data)->data, dlen);
-
-	usb_fill_bulk_urb(ctx->urb, d->udev, usb_sndbulkpipe(d->udev, GCAN_EP_TX_OUT & 0x0f),
-			  ctx->buf, GCAN_TX_BLOCK_SIZE, gcan_tx_complete, ctx);
-	usb_anchor_urb(ctx->urb, &c->tx_anchor);
-
-	err = can_put_echo_skb(skb, netdev, ctx->idx, 0);
-	if (err)
-		goto release;
-	if (atomic_inc_return(&c->tx_active) >= GCAN_MAX_TX_URBS)
-		netif_stop_queue(netdev);
-
-	err = usb_submit_urb(ctx->urb, GFP_ATOMIC);
-	if (err) {
-		can_free_echo_skb(netdev, ctx->idx, NULL);
-		usb_unanchor_urb(ctx->urb);
-		atomic_dec(&c->tx_active);
-		netif_wake_queue(netdev);
-		spin_lock_irqsave(&c->tx_lock, irqflags);
-		ctx->busy = false;
-		spin_unlock_irqrestore(&c->tx_lock, irqflags);
-		netdev->stats.tx_dropped++;
-		if (err == -ENODEV)
-			netif_device_detach(netdev);
-		else
-			netdev_warn(netdev, "tx submit failed: %d\n", err);
+	spin_lock_irqsave(&d->tx_lock, irqflags);
+	blk = d->tx_cur;
+	if (blk->len + GCAN_REC_HDR_LEN + dlen > GCAN_TX_BLOCK_SIZE || blk->n >= GCAN_TX_MAX_RECS) {
+		gcan_tx_kick(d);	/* block is full: send it and start the next one */
+		blk = d->tx_cur;
+		if (blk->n) {		/* no USB slot free yet; a completion wakes the queue */
+			netif_stop_queue(netdev);
+			spin_unlock_irqrestore(&d->tx_lock, irqflags);
+			return NETDEV_TX_BUSY;
+		}
 	}
-	return NETDEV_TX_OK;
 
-release:
-	usb_unanchor_urb(ctx->urb);
-	spin_lock_irqsave(&c->tx_lock, irqflags);
-	ctx->busy = false;
-	spin_unlock_irqrestore(&c->tx_lock, irqflags);
-	netdev->stats.tx_dropped++;
-	dev_kfree_skb(skb);
+	idx = c->tx_head;
+	err = can_put_echo_skb(skb, netdev, idx, 0);	/* consumes the skb, also on error */
+	if (err) {
+		spin_unlock_irqrestore(&d->tx_lock, irqflags);
+		netdev->stats.tx_dropped++;
+		return NETDEV_TX_OK;
+	}
+	c->tx_head = (idx + 1) % GCAN_TX_ECHO_SLOTS;
+
+	rec = blk->buf + blk->len;
+	memset(rec, 0, GCAN_REC_HDR_LEN + dlen);
+	rec[0] = GCAN_REC_HDR_LEN + dlen;
+	rec[1] = c->ch;
+	/* bytes 2..9: timestamp, left zero */
+	rec[10] = flags;
+	rec[11] = dlen;
+	put_unaligned_le32(cf->can_id & ((cf->can_id & CAN_EFF_FLAG) ? CAN_EFF_MASK : CAN_SFF_MASK), &rec[12]);
+	if (dlen)
+		memcpy(&rec[GCAN_REC_HDR_LEN], cf->data, dlen);	/* data starts at the same offset in both frame types */
+	blk->ent[blk->n].ch = c->ch;
+	blk->ent[blk->n].idx = idx;
+	blk->n++;
+	blk->len += GCAN_REC_HDR_LEN + dlen;
+
+	if (++c->tx_cnt >= GCAN_TX_ECHO_SLOTS)
+		netif_stop_queue(netdev);
+	gcan_tx_kick(d);
+	spin_unlock_irqrestore(&d->tx_lock, irqflags);
 	return NETDEV_TX_OK;
+}
+
+/* Drop this channel's frames that still wait in the open block, then let the blocks on the wire finish
+ * (or kill them if the device stalls, e.g. unacknowledged frames). */
+static void gcan_tx_flush_chan(struct gcan_chan *c)
+{
+	struct gcan_dev *d = c->dev;
+	struct gcan_tx_blk *blk;
+	unsigned int i, pos = 0, off = 0, keep = 0;
+	unsigned long flags;
+
+	spin_lock_irqsave(&d->tx_lock, flags);
+	blk = d->tx_cur;
+	for (i = 0; i < blk->n; i++) {
+		unsigned int rl = blk->buf[pos];
+
+		if (blk->ent[i].ch == c->ch) {
+			gcan_tx_drop_ents(d, &blk->ent[i], 1);
+		} else {
+			memmove(blk->buf + off, blk->buf + pos, rl);
+			blk->ent[keep++] = blk->ent[i];
+			off += rl;
+		}
+		pos += rl;
+	}
+	blk->n = keep;
+	blk->len = off;
+	spin_unlock_irqrestore(&d->tx_lock, flags);
+
+	/* tx_head / tx_cnt are deliberately not reset: a completion that is still running subtracts from tx_cnt,
+	 * and close_candev() frees the echo slots. Every queued frame is released by a completion or dropped above. */
+	if (!usb_wait_anchor_empty_timeout(&d->tx_anchor, 200))
+		usb_kill_anchored_urbs(&d->tx_anchor);
 }
 
 /* ---------------------------------------------------------------- netdev open / stop */
@@ -556,17 +663,13 @@ static int gcan_open(struct net_device *netdev)
 {
 	struct gcan_chan *c = netdev_priv(netdev);
 	struct gcan_dev *d = c->dev;
-	int err, i;
+	int err;
 
 	err = open_candev(netdev);
 	if (err)
 		return err;
 
 	mutex_lock(&d->open_lock);
-
-	for (i = 0; i < GCAN_MAX_TX_URBS; i++)
-		c->tx[i].busy = false;
-	atomic_set(&c->tx_active, 0);
 
 	err = gcan_cmd_init(c);
 	if (err)
@@ -606,7 +709,7 @@ static int gcan_stop(struct net_device *netdev)
 	gcan_cmd_simple(c, 0x03);		/* stop */
 	gcan_cmd_simple(c, 0x01);		/* reset */
 
-	usb_kill_anchored_urbs(&c->tx_anchor);
+	gcan_tx_flush_chan(c);
 	if (d->open_count > 0 && --d->open_count == 0)
 		usb_kill_anchored_urbs(&d->rx_anchor);
 
@@ -636,7 +739,7 @@ static int gcan_set_mode(struct net_device *netdev, enum can_mode mode)
 		return -EOPNOTSUPP;
 
 	mutex_lock(&d->open_lock);
-	usb_kill_anchored_urbs(&c->tx_anchor);
+	gcan_tx_flush_chan(c);
 	gcan_cmd_simple(c, 0x03);
 	gcan_cmd_simple(c, 0x01);
 	err = gcan_cmd_init(c);
@@ -663,12 +766,6 @@ static const struct net_device_ops gcan_netdev_ops = {
 
 static void gcan_free_chan(struct gcan_chan *c)
 {
-	int i;
-
-	for (i = 0; i < GCAN_MAX_TX_URBS; i++) {
-		usb_free_urb(c->tx[i].urb);
-		kfree(c->tx[i].buf);
-	}
 	free_candev(c->netdev);
 }
 
@@ -676,27 +773,14 @@ static struct gcan_chan *gcan_create_chan(struct gcan_dev *d, u8 ch)
 {
 	struct net_device *netdev;
 	struct gcan_chan *c;
-	int i;
 
-	netdev = alloc_candev(sizeof(*c), GCAN_MAX_TX_URBS);
+	netdev = alloc_candev(sizeof(*c), GCAN_TX_ECHO_SLOTS);
 	if (!netdev)
 		return NULL;
 	c = netdev_priv(netdev);
 	c->netdev = netdev;
 	c->dev = d;
 	c->ch = ch;
-	spin_lock_init(&c->tx_lock);
-	atomic_set(&c->tx_active, 0);
-	init_usb_anchor(&c->tx_anchor);
-
-	for (i = 0; i < GCAN_MAX_TX_URBS; i++) {
-		c->tx[i].chan = c;
-		c->tx[i].idx = i;
-		c->tx[i].urb = usb_alloc_urb(0, GFP_KERNEL);
-		c->tx[i].buf = kzalloc(GCAN_TX_BLOCK_SIZE, GFP_KERNEL);
-		if (!c->tx[i].urb || !c->tx[i].buf)
-			goto fail;
-	}
 
 	c->can.bitrate_const = gcan_nominal_rates;
 	c->can.bitrate_const_cnt = ARRAY_SIZE(gcan_nominal_rates);
@@ -711,9 +795,6 @@ static struct gcan_chan *gcan_create_chan(struct gcan_dev *d, u8 ch)
 	netdev->dev_port = ch;
 	SET_NETDEV_DEV(netdev, &d->intf->dev);
 	return c;
-fail:
-	gcan_free_chan(c);
-	return NULL;
 }
 
 static int gcan_check_endpoints(struct usb_interface *intf)
@@ -745,6 +826,10 @@ static void gcan_free_dev(struct gcan_dev *d)
 		usb_free_urb(d->rx_urb[i]);
 		kfree(d->rx_buf[i]);
 	}
+	for (i = 0; i < GCAN_NUM_TX_BLOCKS; i++) {
+		usb_free_urb(d->tx_blk[i].urb);
+		kfree(d->tx_blk[i].buf);
+	}
 	usb_free_urb(d->ack_urb);
 	kfree(d->ack_buf);
 	kfree(d->cmd_buf);
@@ -771,6 +856,8 @@ static int gcan_probe(struct usb_interface *intf, const struct usb_device_id *id
 	mutex_init(&d->cmd_lock);
 	mutex_init(&d->open_lock);
 	init_usb_anchor(&d->rx_anchor);
+	init_usb_anchor(&d->tx_anchor);
+	spin_lock_init(&d->tx_lock);
 
 	d->cmd_buf = kmalloc(GCAN_CMD_BUF_SIZE, GFP_KERNEL);
 	d->ack_buf = kmalloc(GCAN_ACK_BUF_SIZE, GFP_KERNEL);
@@ -787,6 +874,16 @@ static int gcan_probe(struct usb_interface *intf, const struct usb_device_id *id
 			goto fail_dev;
 		}
 	}
+	for (i = 0; i < GCAN_NUM_TX_BLOCKS; i++) {
+		d->tx_blk[i].dev = d;
+		d->tx_blk[i].urb = usb_alloc_urb(0, GFP_KERNEL);
+		d->tx_blk[i].buf = kzalloc(GCAN_TX_BLOCK_SIZE, GFP_KERNEL);
+		if (!d->tx_blk[i].urb || !d->tx_blk[i].buf) {
+			err = -ENOMEM;
+			goto fail_dev;
+		}
+	}
+	d->tx_cur = &d->tx_blk[0];
 	usb_set_intfdata(intf, d);
 
 	err = gcan_cmd_time_sync(d);
@@ -841,8 +938,11 @@ static void gcan_disconnect(struct usb_interface *intf)
 		if (!d->chan[i])
 			continue;
 		unregister_candev(d->chan[i]->netdev);	/* closes the interface if it is up */
-		usb_kill_anchored_urbs(&d->chan[i]->tx_anchor);
-		gcan_free_chan(d->chan[i]);
+	}
+	usb_kill_anchored_urbs(&d->tx_anchor);
+	for (i = 0; i < GCAN_MAX_CHAN; i++) {
+		if (d->chan[i])
+			gcan_free_chan(d->chan[i]);
 	}
 	gcan_free_dev(d);
 }

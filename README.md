@@ -24,7 +24,7 @@ the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tr
 | Both channels receiving at once (FD radar on can0, classic radar on can1: 141 + 1641 frames/s, no frames crossing channels, 0 errors, 0 drops, all frames decode) | yes, tested on hardware |
 | Transmit on one channel (cyclic inputs, 110 frames/s) while the other receives an FD stream: no transmit errors, no lost receive cycles (239 of 239) | yes, tested on hardware |
 | Radar with CAN FD firmware on can0 + radar with classic firmware on can1: receive (840 and 1640 frames/s, all frames decode against their DBCs, 0 errors), cyclic inputs on both, radar echoes speed and yaw, read-only radar ID query answered | yes, tested on hardware |
-| Both channels transmitting ~110 frames/s each at the same time | **partly**: ~15% of frames dropped by the kernel queue (see docs/TODO.md) |
+| Both channels transmitting at the same time: 110 frames/s each (0 drops; the earlier one-frame-per-write version dropped ~15%) and 550 frames/s each (0 drops), frames batched into shared 1024-byte writes | yes, tested on hardware |
 | FD *transmit* of frames > 8 B, extended IDs, RTR | not tested yet |
 | Acceptance filters, hardware timestamps | not implemented |
 
