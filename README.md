@@ -52,4 +52,6 @@ Without `fd on` the data rate is set equal to the nominal rate.
 - RTR frames are sent without data bytes; the transmit layout for RTR was never captured.
 - The device does not loop back transmitted frames on the receive stream (checked with one frame). `candump` shows each sent frame once, from the normal SocketCAN local echo.
 
+Pending tests and open items: [docs/TODO.md](docs/TODO.md).
+
 See [contribution.md](contribution.md) and [LICENSE.md](LICENSE.md).
