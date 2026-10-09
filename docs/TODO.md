@@ -7,7 +7,7 @@ These need a bus where both ends are under our control: disconnect the radars an
 (CAN-H to CAN-H, CAN-L to CAN-L, check termination in the adapter manual), bring both channels up at the same bitrate and
 send from one channel while running `candump` on the other. Compare the bytes in both directions.
 
-- [ ] CAN FD frames longer than 8 bytes (12, 16, 32, 64) with and without bit-rate switch
+- [ ] CAN FD frames longer than 8 bytes, transmit direction (12, 16, 32, 64) with and without bit-rate switch. Receive of 16, 24 and 64 byte frames with BRS is verified.
 - [ ] Extended (29-bit) IDs, classic and FD
 - [ ] RTR frames (the driver sends no data bytes; the real transmit layout was never captured)
 - [ ] FD with a different data bitrate than 2M, and other nominal bitrates from the table (only 500K and 500K/2M were run)
