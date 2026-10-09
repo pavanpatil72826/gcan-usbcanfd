@@ -16,7 +16,8 @@ the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tr
 | `ip link set can0 down` / up cycle | yes, receive and transmit recover |
 | Unplug while up, then replug | yes, clean disconnect, driver rebinds on its own |
 | Error counters, ERROR-PASSIVE with radar off, BUS-OFF, `ip link ... type can restart` recovery | yes, tested on hardware |
-| CAN1 (second connector), classic CAN, FD frames > 8 B, RTR | not tested yet |
+| Classic CAN receive (`fd off`, 500K, 82 standard IDs, ~1640 frames/s, no errors or drops) | yes, tested on hardware |
+| CAN1 (second connector), classic transmit, FD frames > 8 B, extended IDs, RTR | not tested yet |
 | Acceptance filters, hardware timestamps | not implemented |
 
 ## Build and load
