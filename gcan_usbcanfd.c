@@ -267,13 +267,23 @@ drop:
 	netdev->stats.rx_dropped++;
 }
 
+/* CAN error state of one direction from its error counter (ISO 11898: warning >= 96, passive >= 128) */
+static enum can_state gcan_counter_state(u8 cnt)
+{
+	if (cnt >= 128)
+		return CAN_STATE_ERROR_PASSIVE;
+	if (cnt >= 96)
+		return CAN_STATE_ERROR_WARNING;
+	return CAN_STATE_ERROR_ACTIVE;
+}
+
 static void gcan_status_record(struct gcan_dev *d, const u8 *rec)
 {
 	struct gcan_chan *c;
 	struct net_device *netdev;
 	struct can_frame *cf;
 	struct sk_buff *skb;
-	enum can_state new_state;
+	enum can_state new_state, tx_state, rx_state;
 	u32 psr;
 	u8 tec = rec[GCAN_ST_ECR], rx = rec[GCAN_ST_ECR + 1] & 0x7f;
 
@@ -287,20 +297,21 @@ static void gcan_status_record(struct gcan_dev *d, const u8 *rec)
 	c->tec = tec;
 	c->rec = rx;
 	psr = get_unaligned_le32(&rec[GCAN_ST_PSR]);
+	tx_state = gcan_counter_state(tec);
+	rx_state = gcan_counter_state(rx);
 	if (psr & GCAN_PSR_BO)
-		new_state = CAN_STATE_BUS_OFF;
-	else if (psr & GCAN_PSR_EP)
-		new_state = CAN_STATE_ERROR_PASSIVE;
-	else if (psr & GCAN_PSR_EW)
-		new_state = CAN_STATE_ERROR_WARNING;
-	else
-		new_state = CAN_STATE_ERROR_ACTIVE;
+		tx_state = rx_state = CAN_STATE_BUS_OFF;
+	else if ((psr & GCAN_PSR_EP) && max(tx_state, rx_state) < CAN_STATE_ERROR_PASSIVE)
+		tx_state = CAN_STATE_ERROR_PASSIVE;	/* flag set but counters disagree: trust the flag */
+	else if ((psr & GCAN_PSR_EW) && max(tx_state, rx_state) < CAN_STATE_ERROR_WARNING)
+		tx_state = CAN_STATE_ERROR_WARNING;
+	new_state = max(tx_state, rx_state);
 
 	if (new_state == c->can.state || c->can.state == CAN_STATE_BUS_OFF)
 		return;		/* once bus-off, only a restart brings the channel back */
 
 	skb = alloc_can_err_skb(netdev, &cf);
-	can_change_state(netdev, skb ? cf : NULL, new_state, new_state);
+	can_change_state(netdev, skb ? cf : NULL, tx_state, rx_state);
 	if (skb) {
 		cf->data[6] = tec;
 		cf->data[7] = rx;
