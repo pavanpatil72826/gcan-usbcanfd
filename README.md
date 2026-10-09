@@ -17,7 +17,8 @@ the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tr
 | Unplug while up, then replug | yes, clean disconnect, driver rebinds on its own |
 | Error counters, ERROR-PASSIVE with radar off, BUS-OFF, `ip link ... type can restart` recovery | yes, tested on hardware |
 | Classic CAN receive (`fd off`, 500K, 82 standard IDs, ~1640 frames/s, no errors or drops) | yes, tested on hardware |
-| CAN1 (second connector), classic transmit, FD frames > 8 B, extended IDs, RTR | not tested yet |
+| Classic CAN transmit (cyclic speed / yaw / gear, 110 frames/s, radar echoes the values) | yes, tested on hardware |
+| CAN1 (second connector), FD frames > 8 B, extended IDs, RTR | not tested yet |
 | Acceptance filters, hardware timestamps | not implemented |
 
 ## Build and load
