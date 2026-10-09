@@ -1,0 +1,42 @@
+# gcan-usbcanfd
+
+Linux SocketCAN kernel driver for the GCAN USBCANFD adapter (USB `0c66:000e`). CAN and CAN FD show up as `can0` / `can1`;
+no vendor library is needed. GCAN ships only Windows libraries, so the USB protocol was reverse engineered from captures of
+the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tree module, targets kernel 6.8.
+
+**Status: early development.**
+
+| | |
+|---|---|
+| Builds and loads on 6.8 | yes |
+| Plug-in creates `can0` / `can1`, `ip link set up` works | yes |
+| Bitrate tables shown by `ip -details link` | yes |
+| Receive in `candump` | not yet confirmed with this driver |
+| Transmit with `cansend` | not yet confirmed with this driver |
+| Error / bus-off reporting, filters, hardware timestamps | not implemented |
+
+## Build and load
+    make
+    make load        # modprobe can, can_raw, can_dev; insmod gcan_usbcanfd.ko  (asks for sudo)
+    make unload
+
+`make install` copies the module to `/lib/modules/$(uname -r)/extra/` and runs `depmod`, after which plugging in the
+adapter (or `sudo modprobe gcan_usbcanfd`) loads it automatically. Needs the kernel headers (`linux-headers-$(uname -r)`).
+Redo `make install` after a kernel update.
+
+## Use
+    dmesg | tail                    # "GCAN USBCANFD ready: can0, can1"
+    sudo ip link set can0 up type can bitrate 500000 dbitrate 2000000 fd on
+    candump can0
+    cansend can0 123##1112233445566778
+    sudo ip link set can0 down
+
+Only the adapter's own bitrate table is accepted (nominal 1M..5K, data 5M..5K); other values are rejected by `ip link`.
+Without `fd on` the data rate is set equal to the nominal rate.
+
+## Notes
+- Do not use a userspace libusb tool on the adapter while this driver is loaded: tools that call `detach_kernel_driver` will remove it from the device.
+- RTR frames are sent without data bytes; the transmit layout for RTR was never captured.
+- The device may echo transmitted frames on the receive stream; this is not yet checked.
+
+See [contribution.md](contribution.md) and [LICENSE.md](LICENSE.md).

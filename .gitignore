@@ -80,3 +80,16 @@ yarn.lock
 
 # VSCode
 .vscode
+
+# Linux kernel module build output
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+.*.cmd
+.tmp_versions/
+Module.symvers
+modules.order
+
+# This repo's kernel module Makefile (the generic "Makefile" rule above is for CMake projects)
+!Makefile
