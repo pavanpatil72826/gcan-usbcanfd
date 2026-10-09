@@ -13,7 +13,7 @@ send from one channel while running `candump` on the other. Compare the bytes in
 - [ ] FD with a different data bitrate than 2M, and other nominal bitrates from the table (only 500K and 500K/2M were run)
 - [ ] Reboot with the adapter plugged in: `can0` / `can1` should be present after login (plug-in loading is tested, reboot is not)
 - [ ] Unplug while transmitting heavily, and while a channel is in bus-off
-- [ ] Two channels transmitting at the same time (each was tested alone)
+- [ ] Two channels transmitting at the same time (receiving on both at once is verified; transmit was tested on one channel at a time)
 
 ## Open items (not tests)
 - [ ] Status record bytes 18..29 (lost / failed counters, bus load) and the type 3 record are not decoded; see `docs/PROTOCOL.md`
