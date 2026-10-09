@@ -15,8 +15,8 @@ send from one channel while running `candump` on the other. Compare the bytes in
 - [ ] Unplug while transmitting heavily, and while a channel is in bus-off
 
 ## Open items (not tests)
-- [ ] After the transmit batching rewrite: bus-off restart and unplug/replug still to be re-run (the channel flush code changed). The down/up cycle was re-run and passes.
-- [ ] One receive drop (`rx_dropped=1` on can0) seen under the 550 frames/s stress run; unexplained, not growing
+- [ ] After the transmit batching rewrite: unplug/replug still to be re-run (the teardown code changed). The down/up cycle, a burst into a stalled channel (110 of 120 accepted, 10 refused, no hang), bus-off and `restart` were re-run and pass.
+- [ ] One receive drop (`rx_dropped` on can0: 1 after the 550 frames/s stress run, a few more around each bus-off restart); unexplained, not growing during normal receive
 - [ ] Status record bytes 18..29 (lost / failed counters, bus load) and the type 3 record are not decoded; see `docs/PROTOCOL.md`
 - [ ] Acceptance filters and listen-only mode are not implemented (the init packet has fields for filters)
 - [ ] Hardware timestamps are ignored (receive records carry them)
