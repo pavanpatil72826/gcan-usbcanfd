@@ -15,8 +15,9 @@ the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tr
 | Transmit with `cansend` and python-can (8 B FD+BRS, 20 ms cyclic) | yes, tested on hardware |
 | `ip link set can0 down` / up cycle | yes, receive and transmit recover |
 | Unplug while up, then replug | yes, clean disconnect, driver rebinds on its own |
+| Error counters, ERROR-PASSIVE with radar off, BUS-OFF, `ip link ... type can restart` recovery | yes, tested on hardware |
 | CAN1 (second connector), classic CAN, FD frames > 8 B, RTR | not tested yet |
-| Error / bus-off reporting, filters, hardware timestamps | not implemented |
+| Acceptance filters, hardware timestamps | not implemented |
 
 ## Build and load
     make
@@ -40,8 +41,8 @@ Without `fd on` the data rate is set equal to the nominal rate.
 ## Notes
 - Channels: Linux `can0` is device channel index 0 (called channel 1 by the vendor documents), `can1` is index 1 (channel 2).
 - With no node on the bus to acknowledge frames, the device keeps retrying and stops accepting writes after ~5 frames. The driver then returns
-  `ENOBUFS` to the sender and stays alive; `ip link set can0 down` and up clears it. The adapter's state stays `ERROR-ACTIVE` because the
-  status / bus-off record is not decoded yet.
+  `ENOBUFS` to the sender and stays alive. The channel goes `ERROR-PASSIVE` (TEC 128) and can reach `BUS-OFF`; recover with
+  `ip link set can0 type can restart` (or down and up).
 - Do not use a userspace libusb tool on the adapter while this driver is loaded: tools that call `detach_kernel_driver` will remove it from the device.
 - RTR frames are sent without data bytes; the transmit layout for RTR was never captured.
 - The device does not loop back transmitted frames on the receive stream (checked with one frame). `candump` shows each sent frame once, from the normal SocketCAN local echo.
