@@ -48,7 +48,15 @@
 #define GCAN_CMD_TIMEOUT_MS	1000
 
 #define GCAN_REC_HDR_LEN	16	/* len ch ts[8] flags dlen id[4] */
-#define GCAN_REC_STATUS_LEN	30	/* periodic bus status record, layout unknown: skipped */
+#define GCAN_REC_STATUS_LEN	30	/* periodic channel status record, see gcan_status_record() */
+
+/* Status record (30 bytes): len ch(=type) ts[8] ECR[4] PSR[4] ...; type 0/1 = channel 0/1, type 3 = unknown.
+ * ECR/PSR are the Bosch M_CAN error counter and protocol status registers (vendor header ECanFDVci.h). */
+#define GCAN_ST_ECR		10
+#define GCAN_ST_PSR		14
+#define GCAN_PSR_EP		BIT(5)
+#define GCAN_PSR_EW		BIT(6)
+#define GCAN_PSR_BO		BIT(7)
 
 #define GCAN_FLAG_FD		BIT(0)
 #define GCAN_FLAG_EXT		BIT(1)
@@ -84,6 +92,7 @@ struct gcan_chan {
 	struct gcan_dev *dev;
 	u8 ch;
 	bool registered;
+	u8 tec, rec;		/* last transmit / receive error counters from the status record */
 
 	spinlock_t tx_lock;
 	atomic_t tx_active;
@@ -258,6 +267,51 @@ drop:
 	netdev->stats.rx_dropped++;
 }
 
+static void gcan_status_record(struct gcan_dev *d, const u8 *rec)
+{
+	struct gcan_chan *c;
+	struct net_device *netdev;
+	struct can_frame *cf;
+	struct sk_buff *skb;
+	enum can_state new_state;
+	u32 psr;
+	u8 tec = rec[GCAN_ST_ECR], rx = rec[GCAN_ST_ECR + 1] & 0x7f;
+
+	if (rec[1] >= GCAN_MAX_CHAN || !d->chan[rec[1]])
+		return;
+	c = d->chan[rec[1]];
+	netdev = c->netdev;
+	if (!netif_running(netdev))
+		return;
+
+	c->tec = tec;
+	c->rec = rx;
+	psr = get_unaligned_le32(&rec[GCAN_ST_PSR]);
+	if (psr & GCAN_PSR_BO)
+		new_state = CAN_STATE_BUS_OFF;
+	else if (psr & GCAN_PSR_EP)
+		new_state = CAN_STATE_ERROR_PASSIVE;
+	else if (psr & GCAN_PSR_EW)
+		new_state = CAN_STATE_ERROR_WARNING;
+	else
+		new_state = CAN_STATE_ERROR_ACTIVE;
+
+	if (new_state == c->can.state || c->can.state == CAN_STATE_BUS_OFF)
+		return;		/* once bus-off, only a restart brings the channel back */
+
+	skb = alloc_can_err_skb(netdev, &cf);
+	can_change_state(netdev, skb ? cf : NULL, new_state, new_state);
+	if (skb) {
+		cf->data[6] = tec;
+		cf->data[7] = rx;
+		netdev->stats.rx_packets++;
+		netdev->stats.rx_bytes += cf->len;
+		netif_rx(skb);
+	}
+	if (new_state == CAN_STATE_BUS_OFF)
+		can_bus_off(netdev);
+}
+
 static void gcan_parse_block(struct gcan_dev *d, const u8 *buf, unsigned int len)
 {
 	unsigned int i = 0;
@@ -267,7 +321,9 @@ static void gcan_parse_block(struct gcan_dev *d, const u8 *buf, unsigned int len
 
 		if (n == 0 || i + n > len)
 			break;
-		if (n >= GCAN_REC_HDR_LEN && n != GCAN_REC_STATUS_LEN)
+		if (n == GCAN_REC_STATUS_LEN)
+			gcan_status_record(d, buf + i);
+		else if (n >= GCAN_REC_HDR_LEN)
 			gcan_rx_record(d, buf + i, n);
 		i += n;
 	}
@@ -543,6 +599,42 @@ static int gcan_stop(struct net_device *netdev)
 	return 0;
 }
 
+static int gcan_get_berr_counter(const struct net_device *netdev, struct can_berr_counter *bec)
+{
+	const struct gcan_chan *c = netdev_priv(netdev);
+
+	bec->txerr = c->tec;
+	bec->rxerr = c->rec;
+	return 0;
+}
+
+/* "ip link set canX type can restart" (or restart-ms) after bus-off: run the stop/reset/init/start sequence again */
+static int gcan_set_mode(struct net_device *netdev, enum can_mode mode)
+{
+	struct gcan_chan *c = netdev_priv(netdev);
+	struct gcan_dev *d = c->dev;
+	int err;
+
+	if (mode != CAN_MODE_START)
+		return -EOPNOTSUPP;
+
+	mutex_lock(&d->open_lock);
+	usb_kill_anchored_urbs(&c->tx_anchor);
+	gcan_cmd_simple(c, 0x03);
+	gcan_cmd_simple(c, 0x01);
+	err = gcan_cmd_init(c);
+	if (!err)
+		err = gcan_cmd_simple(c, 0x02);
+	mutex_unlock(&d->open_lock);
+	if (err)
+		return err;
+
+	c->tec = c->rec = 0;
+	c->can.state = CAN_STATE_ERROR_ACTIVE;
+	netif_wake_queue(netdev);
+	return 0;
+}
+
 static const struct net_device_ops gcan_netdev_ops = {
 	.ndo_open	= gcan_open,
 	.ndo_stop	= gcan_stop,
@@ -594,6 +686,8 @@ static struct gcan_chan *gcan_create_chan(struct gcan_dev *d, u8 ch)
 	c->can.data_bitrate_const = gcan_data_rates;
 	c->can.data_bitrate_const_cnt = ARRAY_SIZE(gcan_data_rates);
 	c->can.ctrlmode_supported = CAN_CTRLMODE_FD;
+	c->can.do_get_berr_counter = gcan_get_berr_counter;
+	c->can.do_set_mode = gcan_set_mode;
 
 	netdev->netdev_ops = &gcan_netdev_ops;
 	netdev->flags |= IFF_ECHO;
