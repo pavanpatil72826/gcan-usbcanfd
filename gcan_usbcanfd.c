@@ -17,7 +17,7 @@
  *   ip link set can0 up type can bitrate 500000 dbitrate 2000000 fd on
  * Only the bitrates in the tables below are accepted, because the device takes a table index.
  *
- * Target kernel: 6.8 (flat can_priv bittiming layout).
+ * Target kernel: 6.8 (flat can_priv bittiming layout). Also built and run on 5.15 (aarch64, Jetson Orin NX, JetPack 6).
  *
  */
 #include <linux/module.h>

@@ -3,6 +3,7 @@
 Everything not listed here has been tested on hardware (see the status table in the README).
 
 ## Needs a test (on hold)
+- [ ] Re-run the receive / transmit / error tests on the Jetson (kernel 5.15, aarch64): only "builds and the network works" is recorded so far
 These need a bus where both ends are under our control: disconnect the radars and join the two connectors of the adapter
 (CAN-H to CAN-H, CAN-L to CAN-L, check termination in the adapter manual), bring both channels up at the same bitrate and
 send from one channel while running `candump` on the other. Compare the bytes in both directions.

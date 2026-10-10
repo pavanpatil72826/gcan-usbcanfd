@@ -2,13 +2,14 @@
 
 Linux SocketCAN kernel driver for the GCAN USBCANFD adapter (USB `0c66:000e`). CAN and CAN FD show up as `can0` / `can1`;
 no vendor library is needed. GCAN ships only Windows libraries, so the USB protocol was reverse engineered from captures of
-the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tree module, targets kernel 6.8.
+the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tree module, written for kernel 6.8 and also built on 5.15 (see the table).
 
 **Status: early development.**
 
 | | |
 |---|---|
-| Builds and loads on 6.8 | yes |
+| Builds and loads on 6.8 (x86_64, Ubuntu) | yes |
+| Builds on 5.15 (aarch64, Jetson Orin NX, JetPack 6); network interfaces work | yes, reported by the maintainer; the full test list below was run on 6.8 only |
 | Plug-in creates `can0` / `can1`, `ip link set up` works | yes |
 | Bitrate tables shown by `ip -details link` | yes |
 | Receive in `candump` (CAN FD, 500K/2M, ~840 frames/s, no drops) | yes, tested on hardware |
