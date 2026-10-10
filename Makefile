@@ -2,8 +2,8 @@
 # @Author: Pavan Patil
 # @Date: 2026-10-08
 # @Last Modified by:   Pavan Patil
-# @Last Modified time: 2026-10-09 12:36:00
-# @Description: Build, load and install the gcan_usbcanfd kernel module.
+# @Last Modified time: 2026-10-10 13:39:11
+# @Description: Build, load, install and uninstall the gcan_usbcanfd kernel module.
 
 obj-m := gcan_usbcanfd.o
 
@@ -33,4 +33,10 @@ install: all
 	sudo cp $(BUILDDIR)/gcan_usbcanfd.ko /lib/modules/$(KVERSION)/extra/
 	sudo depmod -a
 
-.PHONY: all clean load unload install
+# Remove the copy that `make install` put into /lib/modules and refresh the module index.
+# (A module that is currently loaded stays loaded until `make unload` or a reboot.)
+uninstall:
+	sudo rm -f /lib/modules/$(KVERSION)/extra/gcan_usbcanfd.ko
+	sudo depmod -a
+
+.PHONY: all clean load unload install uninstall

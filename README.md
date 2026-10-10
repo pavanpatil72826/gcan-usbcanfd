@@ -36,7 +36,7 @@ the vendor driver (see [docs/PROTOCOL.md](docs/PROTOCOL.md)). Plain C, out-of-tr
 
 `make install` copies the module to `/lib/modules/$(uname -r)/extra/` and runs `depmod`, after which plugging in the
 adapter (or `sudo modprobe gcan_usbcanfd`) loads it automatically. Needs the kernel headers (`linux-headers-$(uname -r)`).
-Redo `make install` after a kernel update.
+Redo `make install` after a kernel update. `make uninstall` removes the installed copy again, and `make clean` removes the `build/` directory.
 
 ## Use
     dmesg | tail                    # "GCAN USBCANFD ready: can0, can1"
